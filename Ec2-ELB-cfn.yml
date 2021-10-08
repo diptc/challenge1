@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+  InstanceType:
+    Type: String
+    Description: Specify instance type
+    Default: t2.micro
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances.
+    Type: String
+    Default: EC2-Key
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+  InstanceAZ1:
+    Type: String
+    Default: us-west-1a
+    AllowedValues:
+      - us-west-1a
+      - us-west-1b
+  InstanceAZ2:
+    Type: String
+    Default: us-west-1b
+    AllowedValues:
+      - us-west-1a
+      - us-west-1b
+  SubnetTrustedAID:
+    Description: Subnet ID of Trusted A 
+    Type: String
+    Default: subnet-0a6bfdfd9143e0273
+  SubnetTrustedBID:
+    Description: Subnet ID of Trusted B 
+    Type: String
+    Default: subnet-09e79e3f3b7cc3d05
+  SubnetPublicAID:
+    Description: Subnet ID of public A 
+    Type: String
+    Default: subnet-0a89a93df77c0c0d8
+  SubnetPublicBID:
+    Description: Subnet ID of public B
+    Type: String
+    Default: subnet-0c31a9754c71b57ad
+  VPCID:
+    Type: String
+    Description: Specify the VPC ID
+    Default: vpc-0003dca01b442236b 
+Resources:
+  PRODEC201:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-03ab7423a204da002
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      AvailabilityZone: !Ref InstanceAZ1
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref myENI1
+          DeviceIndex: 0
+      UserData: 
+        Fn::Base64: |  
+          #!/bin/bash
+          sudo yum update
+          sudo yum -y install java-1.8.0-openjdk.x86_64
+          sudo yum -y install java-1.8.0-openjdk-devel
+          sudo yum -y install tomcat
+          service tomcat start
+          mkdir /usr/share/tomcat/webapps/ROOT
+          touch /usr/share/tomcat/webapps/ROOT/index.html
+          echo "Cloud Formation Tomcat" > /usr/share/tomcat/webapps/ROOT/index.html
+  PRODEC202:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-03ab7423a204da002
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      AvailabilityZone: !Ref InstanceAZ2
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref myENI2
+          DeviceIndex: 0
+      UserData: 
+        Fn::Base64: |  
+          #!/bin/bash
+          sudo yum update
+          sudo yum -y install java-1.8.0-openjdk.x86_64
+          sudo yum -y install java-1.8.0-openjdk-devel
+          sudo yum -y install tomcat
+          service tomcat start
+          mkdir /usr/share/tomcat/webapps/ROOT
+          touch /usr/share/tomcat/webapps/ROOT/index.html
+          echo "Cloud Formation Tomcat" > /usr/share/tomcat/webapps/ROOT/index.html
+          
+  myENI1:
+      Type: AWS::EC2::NetworkInterface
+      Properties:
+         Tags:
+         - Key: Name
+           Value: EC1-ENI-PRI-A
+         Description: ENI for ec2 server.
+         SourceDestCheck: 'false'
+         GroupSet:
+         - !Ref MySecurityGroup
+         SubnetId: !Ref 'SubnetTrustedAID'
+  myENI2:
+      Type: AWS::EC2::NetworkInterface
+      Properties:
+         Tags:
+         - Key: Name
+           Value: EC2-ENI-PRI-B
+         Description: ENI for ec2 server.
+         SourceDestCheck: 'false'
+         GroupSet:
+         - !Ref MySecurityGroup
+         SubnetId: !Ref 'SubnetTrustedBID'
+  MySecurityGroup:
+   Type: 'AWS::EC2::SecurityGroup'
+   Properties:
+      GroupDescription: Base Security Group
+      SecurityGroupIngress:
+         - IpProtocol: tcp
+           CidrIp: 10.0.0.0/8
+           FromPort: 8080
+           ToPort: 8080
+      VpcId: !Ref VPCID
+  SGBaseIngress:
+   Type: 'AWS::EC2::SecurityGroupIngress'
+   Properties:
+      GroupId: !Ref MySecurityGroup
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !GetAtt MySecurityGroup.GroupId
+  SGBaseEgress:
+   Type: 'AWS::EC2::SecurityGroupEgress'
+   Properties:
+      GroupId: !Ref MySecurityGroup
+      IpProtocol: '-1'
+      CidrIp: 0.0.0.0/0
+      
+  LBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: 'LB-Security-Group'
+      GroupName : 'LB-sg'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref VPCID
+  ALBResource:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: false
+      Name: Prod-ext-ec2-elb   
+      Type: application 
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref LBSecurityGroup
+      Subnets:
+        - !Ref 'SubnetPublicAID'
+        - !Ref 'SubnetPublicBID'
+      Tags:
+        - Key: Name
+          Value: Prod-ext-ec2-elb
+  ALBTargetGroup8080:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Port: 8080
+      Protocol: HTTP
+      Name: Prod-ec2-8080-tg
+      VpcId: !Ref 'VPCID'
+      TargetType: instance 
+      Targets:
+        - Port: 8080 
+          Id: !Ref PRODEC201
+        - Port: 8080 
+          Id: !Ref PRODEC202
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '60'
+        - Key: stickiness.enabled
+          Value: 'true'
+  ALBListener80:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref 'ALBResource'
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref 'ALBTargetGroup8080'
+Outputs:
+  LBURL:
+    Description: ELB DNS name to connect.
+    Value: !GetAtt 'ALBResource.DNSName'
+    
